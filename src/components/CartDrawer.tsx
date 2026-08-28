@@ -6,6 +6,7 @@ export default function CartDrawer({
   open,
   lines,
   subtotal,
+  maxQty,
   onClose,
   onQty,
   onRemove,
@@ -15,6 +16,7 @@ export default function CartDrawer({
   open: boolean;
   lines: CartLine[];
   subtotal: number;
+  maxQty: (l: CartLine) => number;
   onClose: () => void;
   onQty: (key: string, delta: number) => void;
   onRemove: (key: string) => void;
@@ -117,12 +119,21 @@ export default function CartDrawer({
                         <button
                           onClick={() => onQty(l.key, 1)}
                           aria-label="Increase quantity"
-                          className="grid h-8 w-8 place-items-center text-ash transition-colors hover:bg-panel hover:text-bone"
+                          disabled={l.qty >= maxQty(l)}
+                          title={l.qty >= maxQty(l) ? "No more stock for this variant" : undefined}
+                          className="grid h-8 w-8 place-items-center text-ash transition-colors enabled:hover:bg-panel enabled:hover:text-bone disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <IconPlus className="w-3 h-3" />
                         </button>
                       </div>
-                      <p className="font-display text-lg">{fmt(l.price * l.qty)}</p>
+                      <div className="text-right">
+                        <p className="font-display text-lg">{fmt(l.price * l.qty)}</p>
+                        {l.qty >= maxQty(l) && (
+                          <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-volt">
+                            Max stock · {maxQty(l)}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <button

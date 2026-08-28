@@ -1,5 +1,6 @@
 import { useState } from "react";
 import Reveal from "./Reveal";
+import { subscribeEmail } from "../lib/db";
 import { IconArrow, IconBolt, IconCash, IconLayers, IconShield, IconSpark, IconTruck } from "./icons";
 
 /* ------------------------- full-width cap banner ------------------------ */
@@ -113,14 +114,15 @@ export function LedgerStrip() {
 /* ---------------------------- newsletter band --------------------------- */
 export function Newsletter() {
   const [email, setEmail] = useState("");
-  const [state, setState] = useState<"idle" | "error" | "done">("idle");
+  const [state, setState] = useState<"idle" | "error" | "done" | "exists">("idle");
 
   const submit = () => {
     if (!email.includes("@") || email.length < 5) {
       setState("error");
       return;
     }
-    setState("done");
+    /* persists to the local database and rejects duplicates */
+    setState(subscribeEmail(email) === "added" ? "done" : "exists");
   };
 
   return (
@@ -139,11 +141,13 @@ export function Newsletter() {
         </Reveal>
 
         <Reveal delay={100} className="w-full max-w-md">
-          {state === "done" ? (
+          {state === "done" || state === "exists" ? (
             <div className="animate-pop flex items-center gap-3 border-2 border-ink bg-ink px-5 py-4 text-volt">
               <IconBolt className="w-5 h-5" />
               <p className="text-sm font-bold uppercase tracking-wide">
-                You're in. Watch your inbox for Drop 005.
+                {state === "exists"
+                  ? "You're already on the list — see you at Drop 005."
+                  : "You're in. Watch your inbox for Drop 005."}
               </p>
             </div>
           ) : (

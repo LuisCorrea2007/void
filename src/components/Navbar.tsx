@@ -1,18 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CATEGORIES, PRODUCTS, fmt, type Category, type Product } from "../data/products";
-import { IconBag, IconBolt, IconClose, IconSearch } from "./icons";
+import { IconBag, IconBolt, IconClose, IconReceipt, IconSearch } from "./icons";
 
 /* Sticky nav: wordmark, category links, live product search, cart trigger */
 export default function Navbar({
   cartCount,
   bumpKey,
+  ordersCount,
   onOpenCart,
+  onOpenOrders,
   onNav,
   onOpenProduct,
 }: {
   cartCount: number;
   bumpKey: number;
+  ordersCount: number;
   onOpenCart: () => void;
+  onOpenOrders: () => void;
   onNav: (cat: Category | "all") => void;
   onOpenProduct: (p: Product) => void;
 }) {
@@ -162,6 +166,20 @@ export default function Navbar({
             }`}
           >
             {mobileSearch ? <IconClose className="w-4 h-4" /> : <IconSearch className="w-4 h-4" />}
+          </button>
+
+          {/* orders history trigger */}
+          <button
+            onClick={onOpenOrders}
+            aria-label={`Order history, ${ordersCount} orders`}
+            className="relative grid h-10 w-10 place-items-center border border-seam text-bone transition-colors hover:border-grape hover:text-grape"
+          >
+            <IconReceipt className="w-5 h-5" />
+            {ordersCount > 0 && (
+              <span className="absolute -right-2 -top-2 grid h-5 min-w-5 place-items-center bg-grape px-1 text-[10px] font-bold text-ink">
+                {ordersCount}
+              </span>
+            )}
           </button>
 
           {/* cart trigger */}

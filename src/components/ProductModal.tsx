@@ -4,13 +4,15 @@ import { IconBolt, IconCheck, IconClose, IconMinus, IconPlus } from "./icons";
 
 export type Selection = { color: ColorOpt; size?: string; closure?: string; qty: number };
 
-/* Product detail overlay — color swatches, size badges, cap closure, qty */
+/* Product detail overlay — stock-aware selectors: colors, sizes, closures */
 export default function ProductModal({
   product,
+  stock,
   onClose,
   onAdd,
 }: {
   product: Product;
+  stock: Record<string, number>; // variant -> units left
   onClose: () => void;
   onAdd: (p: Product, sel: Selection) => void;
 }) {
@@ -28,6 +30,16 @@ export default function ProductModal({
     setQty(1);
     setSizeError(false);
   }, [product]);
+
+  /* current variant + remaining units for it */
+  const variant = product.sizes ? size : closure;
+  const remaining = variant ? stock[variant] ?? 0 : Math.max(0, ...Object.values(stock), 0);
+  const leftHint = variant && remaining > 0 && remaining <= 3 ? `Only ${remaining} left in ${variant}` : null;
+
+  /* keep qty within real stock whenever the variant changes */
+  useEffect(() => {
+    setQty((q) => Math.max(1, Math.min(q, Math.max(1, remaining))));
+  }, [remaining]);
 
   const submit = () => {
     if (product.sizes && !size) {
@@ -125,7 +137,7 @@ export default function ProductModal({
               </div>
             </div>
 
-            {/* ---- SIZE (clothing) ---- */}
+            {/* ---- SIZE (clothing) — sold-out sizes disabled by live stock ---- */}
             {product.sizes && (
               <div className="mt-5">
                 <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-ash">
@@ -133,17 +145,23 @@ export default function ProductModal({
                 </p>
                 <div className={`mt-2.5 flex gap-2 ${sizeError ? "animate-pop" : ""}`}>
                   {product.sizes.map((s) => {
+                    const units = stock[s] ?? 0;
+                    const out = units === 0;
                     const active = size === s;
                     return (
                       <button
                         key={s}
-                        onClick={() => setSize(s)}
+                        onClick={() => !out && setSize(s)}
+                        disabled={out}
+                        title={out ? "Sold out" : `${units} in stock`}
                         className={`h-11 min-w-12 border px-3 text-sm font-bold transition-all duration-200 ${
-                          active
-                            ? "border-volt bg-volt text-ink"
-                            : sizeError
-                              ? "border-ember text-bone hover:border-volt"
-                              : "border-seam text-bone hover:border-volt hover:text-volt"
+                          out
+                            ? "cursor-not-allowed border-seam/50 text-ash/40 line-through"
+                            : active
+                              ? "border-volt bg-volt text-ink"
+                              : sizeError
+                                ? "border-ember text-bone hover:border-volt"
+                                : "border-seam text-bone hover:border-volt hover:text-volt"
                         }`}
                       >
                         {s}
@@ -151,13 +169,15 @@ export default function ProductModal({
                     );
                   })}
                 </div>
-                {sizeError && (
+                {sizeError ? (
                   <p className="mt-2 text-[12px] font-semibold text-ember">Pick a size first — S to XL.</p>
+                ) : (
+                  leftHint && <p className="mt-2 text-[12px] font-semibold text-volt">{leftHint} — moving fast.</p>
                 )}
               </div>
             )}
 
-            {/* ---- CLOSURE (caps) ---- */}
+            {/* ---- CLOSURE (caps) — live units per closure ---- */}
             {product.closures && (
               <div className="mt-5">
                 <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-ash">
@@ -165,30 +185,38 @@ export default function ProductModal({
                 </p>
                 <div className="mt-2.5 grid grid-cols-2 gap-2">
                   {product.closures.map((c) => {
+                    const units = stock[c] ?? 0;
+                    const out = units === 0;
                     const active = closure === c;
                     return (
                       <button
                         key={c}
-                        onClick={() => setClosure(c)}
+                        onClick={() => !out && setClosure(c)}
+                        disabled={out}
                         className={`border px-3 py-2.5 text-left transition-all duration-200 ${
-                          active ? "border-volt bg-volt/10" : "border-seam hover:border-ash"
+                          out
+                            ? "cursor-not-allowed border-seam/50 opacity-50"
+                            : active
+                              ? "border-volt bg-volt/10"
+                              : "border-seam hover:border-ash"
                         }`}
                       >
-                        <span className={`flex items-center gap-1.5 text-sm font-bold ${active ? "text-volt" : "text-bone"}`}>
-                          {active && <IconCheck className="w-3.5 h-3.5" />}
+                        <span className={`flex items-center gap-1.5 text-sm font-bold ${out ? "text-ash line-through" : active ? "text-volt" : "text-bone"}`}>
+                          {active && !out && <IconCheck className="w-3.5 h-3.5" />}
                           {c}
                         </span>
-                        <span className="mt-0.5 block text-[11px] text-ash">
-                          {c === "Snapback" ? "Plastic snap · flat fit" : "Leather strap · custom fit"}
+                        <span className={`mt-0.5 block text-[11px] ${out ? "text-ember" : "text-ash"}`}>
+                          {out ? "Sold out" : `${units} in stock`}
                         </span>
                       </button>
                     );
                   })}
                 </div>
+                {leftHint && <p className="mt-2 text-[12px] font-semibold text-volt">{leftHint} — moving fast.</p>}
               </div>
             )}
 
-            {/* ---- QTY + ADD ---- */}
+            {/* ---- QTY + ADD (clamped to real stock) ---- */}
             <div className="mt-6 flex gap-2.5">
               <div className="flex items-center border border-seam">
                 <button
@@ -200,23 +228,27 @@ export default function ProductModal({
                 </button>
                 <span className="w-9 text-center text-sm font-bold tabular-nums">{qty}</span>
                 <button
-                  onClick={() => setQty((q) => Math.min(9, q + 1))}
+                  onClick={() => setQty((q) => Math.min(Math.max(1, remaining), q + 1))}
                   aria-label="Increase quantity"
-                  className="grid h-12 w-11 place-items-center text-ash transition-colors hover:bg-panel hover:text-bone"
+                  disabled={qty >= remaining}
+                  className="grid h-12 w-11 place-items-center text-ash transition-colors enabled:hover:bg-panel enabled:hover:text-bone disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <IconPlus />
                 </button>
               </div>
               <button
                 onClick={submit}
-                className="group flex h-12 flex-1 items-center justify-center gap-2.5 bg-volt text-[13px] font-bold uppercase tracking-[0.16em] text-ink transition-all duration-200 hover:brightness-110 active:scale-[0.98]"
+                disabled={remaining === 0}
+                className="group flex h-12 flex-1 items-center justify-center gap-2.5 bg-volt text-[13px] font-bold uppercase tracking-[0.16em] text-ink transition-all duration-200 enabled:hover:brightness-110 enabled:active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-seam disabled:text-ash"
               >
-                Add to cart — {fmt(product.price * qty)}
+                {remaining === 0 ? "Sold out" : `Add to cart — ${fmt(product.price * qty)}`}
               </button>
             </div>
 
             <p className="mt-3 text-center text-[11px] uppercase tracking-[0.16em] text-ash">
-              Manual checkout · COD or bank transfer · no card needed
+              {remaining > 0
+                ? `${remaining} units available for this variant`
+                : "This variant is gone — check another"}
             </p>
           </div>
         </div>

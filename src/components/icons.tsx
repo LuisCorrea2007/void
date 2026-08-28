@@ -95,6 +95,29 @@ export const IconWhatsApp = ({ className = "w-5 h-5" }: P) => (
   </svg>
 );
 
+export const IconReceipt = ({ className = "w-5 h-5" }: P) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={`${base} ${className}`} aria-hidden>
+    <path d="M6 3.5h12V21l-2.4-1.5L13.2 21l-2.4-1.5L8.4 21 6 19.5V3.5Z" strokeLinejoin="round" />
+    <path d="M9 8h6M9 11.5h6M9 15h3.5" strokeLinecap="round" />
+  </svg>
+);
+
+export const IconHeart = ({ className = "w-5 h-5", filled = false }: P & { filled?: boolean }) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill={filled ? "currentColor" : "none"}
+    stroke="currentColor"
+    strokeWidth="1.8"
+    className={`${base} ${className}`}
+    aria-hidden
+  >
+    <path
+      d="M12 20.2S4 15.3 4 9.9C4 7 6.2 5 8.6 5c1.5 0 2.7.7 3.4 1.8C12.7 5.7 13.9 5 15.4 5 17.8 5 20 7 20 9.9c0 5.4-8 10.3-8 10.3Z"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
 export const IconCash = ({ className = "w-5 h-5" }: P) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" className={`${base} ${className}`} aria-hidden>
     <rect x="2.8" y="6.5" width="18.4" height="11" rx="1.4" />
