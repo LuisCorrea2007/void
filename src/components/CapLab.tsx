@@ -1,17 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
-import { PRODUCTS, fmt, productById, type ColorOpt, type Product } from "../data/products";
-import { getStock, useDB } from "../lib/db";
+import { fmt, type ColorOpt, type Product } from "../data/products";
+import { getProducts, getStock, productFromDB, useDB } from "../lib/db";
 import Reveal from "./Reveal";
 import { IconBag, IconBolt, IconCheck } from "./icons";
 
-const CAPS = PRODUCTS.filter((p) => p.category === "caps");
-
 /* Brim color rule per cap + colorway */
 function brimHexFor(p: Product, c: ColorOpt): string {
-  if (p.id === "p1") return c.name === "Volt" ? "#141414" : "#c8f542";
+  if (p.id === "p1") return c.name === "Volt" ? "#141414" : "#a785bc";
   if (p.id === "p3") return "#202020";
-  return c.name === "Grape" ? "#7a4fd6" : "#131313";
+  return c.name === "Uva" || c.name === "Grape" ? "#733ca9" : "#131313";
 }
 
 /* Paint the VLT/STRT bolt logo into a canvas texture */
@@ -63,11 +61,12 @@ export default function CapLab({
   presetId: string | null;
   onAdd: (p: Product, sel: { color: ColorOpt; closure: string; qty: number }) => void;
 }) {
-  useDB(); // re-render on stock changes
+  useDB(); // re-render on stock / catalog changes
+  const CAPS = getProducts().filter((p) => p.category === "caps");
   const [capId, setCapId] = useState(presetId ?? "p1");
-  const product = productById(capId) ?? CAPS[0];
-  const [colorway, setColorway] = useState<ColorOpt>(product.colors[0]);
-  const [closure, setClosure] = useState<string>(product.closures?.[0] ?? "Snapback");
+  const product = productFromDB(capId) ?? CAPS[0];
+  const [colorway, setColorway] = useState<ColorOpt>(product?.colors[0] ?? { name: "Negro", hex: "#1a1a1a" });
+  const [closure, setClosure] = useState<string>(product?.closures?.[0] ?? "Snapback");
   const [autoRotate, setAutoRotate] = useState(true);
   const [voltLight, setVoltLight] = useState(true);
 
@@ -87,7 +86,7 @@ export default function CapLab({
   /* preset from product modal "view in 3D" */
   useEffect(() => {
     if (!presetId) return;
-    const p = productById(presetId);
+    const p = productFromDB(presetId);
     if (!p) return;
     setCapId(p.id);
     setColorway(p.colors[0]);
@@ -95,7 +94,7 @@ export default function CapLab({
   }, [presetId]);
 
   useEffect(() => {
-    const p = productById(capId);
+    const p = productFromDB(capId);
     if (!p) return;
     setColorway(p.colors[0]);
     setClosure(p.closures?.[0] ?? "Snapback");
@@ -331,7 +330,7 @@ export default function CapLab({
     const lum = parseInt(colorway.hex.slice(1, 3), 16) * 0.299 +
       parseInt(colorway.hex.slice(3, 5), 16) * 0.587 +
       parseInt(colorway.hex.slice(5, 7), 16) * 0.114;
-    paintLogo(r.logoTex ?? null, lum > 140 ? "#0d0d0d" : "#c8f542");
+    paintLogo(r.logoTex ?? null, lum > 140 ? "#0d0d0d" : "#a785bc");
   }, [colorway, product]);
 
   useEffect(() => {
@@ -349,10 +348,18 @@ export default function CapLab({
   }, [autoRotate]);
 
   useEffect(() => {
-    refs.current.accent?.color.set(voltLight ? 0xc8f542 : 0xa06bff);
+    refs.current.accent?.color.set(voltLight ? 0xa785bc : 0x733ca9);
   }, [voltLight]);
 
   /* ------------------------------ UI ------------------------------------- */
+  if (!product) {
+    return (
+      <section id="lab" className="border-y border-seam bg-coal/60 px-6 py-24 text-center">
+        <p className="text-outline font-display text-4xl sm:text-5xl">LAB 3D SIN GORRAS.</p>
+        <p className="mt-3 text-sm text-ash">Añade gorras desde el Panel de Staff para encender el laboratorio.</p>
+      </section>
+    );
+  }
   const stock = getStock(product.id);
   const variant = closure;
   const left = stock[variant] ?? 0;
@@ -363,15 +370,15 @@ export default function CapLab({
       <div className="mx-auto max-w-7xl px-4 sm:px-6">
         <Reveal>
           <p className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-volt">
-            <span className="h-px w-10 bg-volt" /> 02 — Cap lab
+            <span className="h-px w-10 bg-volt" /> 02 — Lab de gorras
           </p>
           <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
             <h2 className="font-display text-5xl leading-[0.9] sm:text-6xl lg:text-7xl">
-              SPIN IT <span className="text-outline">IN 3D.</span>
+              GÍRALA <span className="text-outline">EN 3D.</span>
             </h2>
             <p className="max-w-xs text-sm text-ash">
-              Drag to rotate, scroll to zoom. Pick a cap, a colorway and a closure — then send the
-              exact config to your cart.
+              Arrastra para rotar, usa la rueda para acercar. Elige gorra, color y cierre — y manda
+              esa configuración exacta al carrito.
             </p>
           </div>
         </Reveal>
@@ -387,11 +394,11 @@ export default function CapLab({
                 <span className="text-[10px] font-bold uppercase tracking-[0.18em]">{product.name}</span>
               </div>
               <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 border border-seam bg-ink/80 px-4 py-1.5 text-[10px] uppercase tracking-[0.2em] text-ash backdrop-blur-sm">
-                drag to spin · scroll to zoom
+                arrastra para girar · rueda para zoom
               </div>
               <div className="pointer-events-none absolute right-4 top-4 border border-seam bg-ink/80 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.18em] backdrop-blur-sm">
                 <span className={left > 0 ? "text-volt" : "text-ember"}>
-                  {left > 0 ? `${left} in stock` : "sold out"}
+                  {left > 0 ? `${left} en stock` : "agotada"}
                 </span>
               </div>
             </div>
@@ -402,7 +409,7 @@ export default function CapLab({
             <div className="flex h-full flex-col gap-6 border border-seam bg-panel/40 p-5 sm:p-6">
               {/* cap picker */}
               <div>
-                <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-ash">Choose your cap</p>
+                <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-ash">Elige tu gorra</p>
                 <div className="mt-2.5 grid grid-cols-3 gap-2">
                   {CAPS.map((c) => {
                     const active = c.id === product.id;
@@ -416,7 +423,7 @@ export default function CapLab({
                       >
                         <img src={c.image} alt={c.name} className="aspect-square w-full object-cover" />
                         <p className={`mt-1.5 truncate text-[11px] font-bold ${active ? "text-volt" : "text-bone"}`}>
-                          {c.name.replace(" Snapback", "").replace(" Dad Hat", "")}
+                          {c.name.replace("Gorra ", "").replace("Snapback ", "")}
                         </p>
                         <p className="text-[10px] text-ash">{fmt(c.price)}</p>
                       </button>
@@ -428,7 +435,7 @@ export default function CapLab({
               {/* colorway */}
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-ash">
-                  Colorway — <span className="text-bone">{colorway.name}</span>
+                  Color — <span className="text-bone">{colorway.name}</span>
                 </p>
                 <div className="mt-2.5 flex gap-2.5">
                   {product.colors.map((c) => {
@@ -453,7 +460,7 @@ export default function CapLab({
 
               {/* closure */}
               <div>
-                <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-ash">Closure</p>
+                <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-ash">Cierre</p>
                 <div className="mt-2.5 grid grid-cols-2 border border-seam">
                   {(product.closures ?? ["Snapback", "Strapback"]).map((c) => {
                     const active = closure === c;
@@ -476,7 +483,7 @@ export default function CapLab({
                           {c}
                         </span>
                         <span className={`text-[11px] ${active && units > 0 ? "text-ink/60" : units === 0 ? "text-ember" : "text-ash"}`}>
-                          {units === 0 ? "sold out" : c === "Snapback" ? "flat brim · snap" : "curved brim · strap"}
+                          {units === 0 ? "agotado" : c === "Snapback" ? "visor plano · snap" : "visor curvo · correa"}
                         </span>
                       </button>
                     );
@@ -492,22 +499,22 @@ export default function CapLab({
                     autoRotate ? "border-volt text-volt" : "border-seam text-ash hover:border-ash"
                   }`}
                 >
-                  Auto-spin {autoRotate ? "on" : "off"}
+                  Giro auto: {autoRotate ? "sí" : "no"}
                 </button>
                 <button
                   onClick={() => setVoltLight((v) => !v)}
                   className={`border px-3.5 py-2 text-[11px] font-bold uppercase tracking-[0.14em] transition-colors ${
-                    voltLight ? "border-volt text-volt" : "border-grape text-grape"
+                    voltLight ? "border-volt text-volt" : "border-grape text-volt"
                   }`}
                 >
-                  Light: {voltLight ? "Volt" : "Grape"}
+                  Luz: {voltLight ? "Volt" : "Uva"}
                 </button>
               </div>
 
               {/* add to cart */}
               <div className="mt-auto border-t border-seam pt-5">
                 <div className="flex items-baseline justify-between">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-ash">This config</p>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-ash">Esta configuración</p>
                   <p className="font-display text-3xl text-volt">{fmt(product.price)}</p>
                 </div>
                 <p className="mt-1 text-[12px] text-ash">
@@ -519,7 +526,7 @@ export default function CapLab({
                   className="group mt-4 flex w-full items-center justify-center gap-3 bg-volt py-4 text-[13px] font-bold uppercase tracking-[0.16em] text-ink transition-all duration-200 enabled:hover:brightness-110 enabled:active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-seam disabled:text-ash"
                 >
                   <IconBag className="w-4 h-4" />
-                  {left === 0 ? "Sold out" : "Add this cap to cart"}
+                  {left === 0 ? "Agotada" : "Añadir esta gorra al carrito"}
                 </button>
               </div>
             </div>

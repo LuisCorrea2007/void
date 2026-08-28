@@ -12,7 +12,7 @@ import { IconBolt, IconClose } from "./icons";
 /* SQL console slide-over — live proof that a real database is running */
 export default function DBConsole({ open, onClose }: { open: boolean; onClose: () => void }) {
   useDB();
-  const [sql, setSql] = useState("SELECT * FROM orders;");
+  const [sql, setSql] = useState("SELECT id, name, price, active FROM products;");
   const [result, setResult] = useState<
     | { kind: "rows"; columns: string[]; rows: SqlValue[][] }
     | { kind: "exec"; changes: string }
@@ -51,9 +51,9 @@ export default function DBConsole({ open, onClose }: { open: boolean; onClose: (
         {/* header */}
         <div className="flex items-center justify-between border-b border-seam px-5 py-4">
           <h2 className="flex items-center gap-3 font-display text-2xl">
-            SQL CONSOLE
+            CONSOLA SQL
             <span className="flex items-center gap-1.5 bg-panel px-2 py-1 font-mono text-[10px] font-normal text-volt">
-              <span className="h-1.5 w-1.5 animate-blink rounded-full bg-volt" /> LIVE
+              <span className="h-1.5 w-1.5 animate-blink rounded-full bg-volt" /> EN VIVO
             </span>
           </h2>
           <button
@@ -69,7 +69,7 @@ export default function DBConsole({ open, onClose }: { open: boolean; onClose: (
           {/* stats */}
           <div>
             <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-ash">
-              Database — {stats.sizeKB} KB on disk
+              Base de datos — {stats.sizeKB} KB en disco
             </p>
             <div className="mt-2.5 grid grid-cols-2 gap-2">
               {stats.tables.map((t) => (
@@ -83,7 +83,7 @@ export default function DBConsole({ open, onClose }: { open: boolean; onClose: (
 
           {/* editor */}
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-ash">Run a statement</p>
+            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-ash">Ejecuta una consulta</p>
             <textarea
               value={sql}
               onChange={(e) => setSql(e.target.value)}
@@ -95,7 +95,7 @@ export default function DBConsole({ open, onClose }: { open: boolean; onClose: (
               onClick={run}
               className="mt-2 flex w-full items-center justify-center gap-2 bg-volt py-3 text-[12px] font-bold uppercase tracking-[0.16em] text-ink transition-all hover:brightness-110 active:scale-[0.98]"
             >
-              <IconBolt className="w-3.5 h-3.5" /> Execute
+              <IconBolt className="w-3.5 h-3.5" /> Ejecutar
             </button>
 
             {result?.kind === "rows" && (
@@ -121,7 +121,7 @@ export default function DBConsole({ open, onClose }: { open: boolean; onClose: (
                   </tbody>
                 </table>
                 <p className="border-t border-seam px-2.5 py-1.5 text-[10px] text-ash">
-                  {result.rows.length} row(s) returned
+                  {result.rows.length} fila(s) devueltas
                 </p>
               </div>
             )}
@@ -140,10 +140,10 @@ export default function DBConsole({ open, onClose }: { open: boolean; onClose: (
           {/* query log */}
           <div>
             <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-ash">
-              Query log — last {log.length}
+              Registro de queries — últimas {log.length}
             </p>
             <div className="mt-2.5 max-h-64 space-y-1 overflow-y-auto border border-seam bg-ink p-3 font-mono text-[11px]">
-              {log.length === 0 && <p className="text-ash">No queries yet.</p>}
+              {log.length === 0 && <p className="text-ash">Aún no hay queries.</p>}
               {log.map((q, i) => (
                 <p key={q.t + i} className="break-all leading-relaxed">
                   <span className="mr-1.5 text-grape">
@@ -159,9 +159,9 @@ export default function DBConsole({ open, onClose }: { open: boolean; onClose: (
 
           {/* danger zone */}
           <div className="border border-dashed border-seam p-4">
-            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-ember">Danger zone</p>
+            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-ember">Zona de peligro</p>
             <p className="mt-1.5 text-[12px] text-ash">
-              Wipe orders, cart, reviews and alerts — stock reseeds to drop 004 values.
+              Borra pedidos, carrito, reseñas y alertas — el catálogo y el stock vuelven a la semilla del drop 004.
             </p>
             <button
               onClick={() => {
@@ -180,12 +180,12 @@ export default function DBConsole({ open, onClose }: { open: boolean; onClose: (
                   : "border-seam text-ash hover:border-ember hover:text-ember"
               }`}
             >
-              {confirmReset ? "Tap again to confirm wipe" : "Reset demo data"}
+              {confirmReset ? "Toca otra vez para confirmar" : "Resetear datos demo"}
             </button>
           </div>
 
           <p className="text-center font-mono text-[10px] uppercase tracking-[0.14em] text-ash">
-            engine: SQLite (WASM) · file persisted in IndexedDB
+            motor: SQLite (WASM) · archivo persistido en IndexedDB
           </p>
         </div>
       </aside>
