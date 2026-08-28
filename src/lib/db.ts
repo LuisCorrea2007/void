@@ -85,6 +85,27 @@ function all<T = Record<string, SqlValue>>(sql: string, params: SqlValue[] = [])
 
 /* -------------------------------- schema -------------------------------- */
 const SCHEMA = `
+CREATE TABLE IF NOT EXISTS meta (
+  key TEXT PRIMARY KEY,
+  val TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS products (
+  id          TEXT PRIMARY KEY,
+  sku         TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  category    TEXT NOT NULL,
+  price       REAL NOT NULL,
+  compare_at  REAL,
+  tag         TEXT,
+  image       TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  details     TEXT NOT NULL DEFAULT '[]',
+  colors      TEXT NOT NULL DEFAULT '[]',
+  sizes       TEXT,
+  closures    TEXT,
+  active      INTEGER NOT NULL DEFAULT 1,
+  created_at  INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS stock (
   product_id TEXT NOT NULL,
   variant    TEXT NOT NULL,
@@ -167,19 +188,48 @@ const SEED_REVIEWS: Omit<Review, "createdAt">[] = [
 
 function seed() {
   db!.run(SCHEMA);
+  const seedVersion = Number(
+    all<{ val: string }>("SELECT val FROM meta WHERE key = 'seed_version'")[0]?.val ?? "0",
+  );
+
+  /* v2: catálogo migrado a la tabla products (contenido en español) */
+  if (seedVersion < 2) {
+    db!.run("DELETE FROM products");
+    PRODUCTS.forEach((p, i) => {
+      db!.run(
+        `INSERT INTO products (id, sku, name, category, price, compare_at, tag, image, description,
+          details, colors, sizes, closures, active, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+        [
+          p.id, p.sku, p.name, p.category, p.price, p.compareAt ?? null, p.tag ?? null,
+          p.image, p.description, JSON.stringify(p.details), JSON.stringify(p.colors),
+          p.sizes ? JSON.stringify(p.sizes) : null, p.closures ? JSON.stringify(p.closures) : null,
+          Date.now() - (PRODUCTS.length - i) * 1000,
+        ],
+      );
+    });
+    db!.run("INSERT OR REPLACE INTO meta (key, val) VALUES ('seed_version', '2')");
+  }
+
   for (const [key, units] of Object.entries(SEED_STOCK)) {
     const [pid, variant] = key.split("|");
     db!.run("INSERT OR IGNORE INTO stock (product_id, variant, units) VALUES (?, ?, ?)", [pid, variant, units]);
   }
-  db!.run("INSERT OR IGNORE INTO promos (code, pct, note) VALUES ('STREET10', 10, 'Drop launch code')");
-  db!.run("INSERT OR IGNORE INTO promos (code, pct, note) VALUES ('VOLT5', 5, 'Newsletter welcome code')");
+  /* garantiza stock para cualquier variante nueva (creada desde el panel) */
+  for (const p of PRODUCTS) {
+    for (const v of p.sizes ?? p.closures ?? []) {
+      db!.run("INSERT OR IGNORE INTO stock (product_id, variant, units) VALUES (?, ?, 10)", [p.id, v]);
+    }
+  }
+  db!.run("INSERT OR IGNORE INTO promos (code, pct, note) VALUES ('CALLE10', 10, 'Código de lanzamiento del drop')");
+  db!.run("INSERT OR IGNORE INTO promos (code, pct, note) VALUES ('VOLT5', 5, 'Código de bienvenida del newsletter')");
   const now = Date.now();
   for (const r of SEED_REVIEWS) {
     db!.run("INSERT OR IGNORE INTO reviews (id, product_id, name, rating, text, created_at) VALUES (?, ?, ?, ?, ?, ?)", [
       r.id, r.productId, r.name, r.rating, r.text, now - r.id * 86400000,
     ]);
   }
-  log("schema created + drop 004 seeded");
+  log("esquema creado + catálogo y drop 004 sembrados");
 }
 
 /** Clamp cart rows to real stock (runs on every boot) */
@@ -194,10 +244,10 @@ function reconcileCart() {
     )[0]?.units ?? 0;
     if (left === 0) {
       db.run("DELETE FROM cart WHERE line_key = ?", [row.line_key]);
-      bootNotes.push("A cart item sold out while you were away — we removed it.");
+      bootNotes.push("Un artículo del carrito se agotó mientras no estabas — lo quitamos.");
     } else if (row.qty > left) {
       db.run("UPDATE cart SET qty = ? WHERE line_key = ?", [left, row.line_key]);
-      bootNotes.push("Cart adjusted to match live stock.");
+      bootNotes.push("Ajustamos tu carrito al stock en vivo.");
     }
   }
   if (bootNotes.length) { persist(db); bump(); }
@@ -243,6 +293,101 @@ export function totalStock(stockMap: Record<string, Record<string, number>>, pro
   return Object.values(stockMap[productId] ?? {}).reduce((a, b) => a + b, 0);
 }
 
+/* -------------------------------- products ------------------------------- */
+type ProductRow = {
+  id: string; sku: string; name: string; category: string; price: number;
+  compare_at: number | null; tag: string | null; image: string; description: string;
+  details: string; colors: string; sizes: string | null; closures: string | null;
+  active: number; created_at: number;
+};
+
+function rowToProduct(r: ProductRow): import("../data/products").Product {
+  return {
+    id: r.id,
+    sku: r.sku,
+    name: r.name,
+    category: r.category as import("../data/products").Category,
+    price: r.price,
+    compareAt: r.compare_at ?? undefined,
+    tag: (r.tag as import("../data/products").Product["tag"]) ?? undefined,
+    image: r.image,
+    description: r.description,
+    details: JSON.parse(r.details || "[]"),
+    colors: JSON.parse(r.colors || "[]"),
+    sizes: r.sizes ? JSON.parse(r.sizes) : undefined,
+    closures: r.closures ? JSON.parse(r.closures) : undefined,
+    active: r.active,
+  };
+}
+
+/** Catálogo vivo — la tienda usa solo activos; el panel usa todos */
+export function getProducts(includeInactive = false): import("../data/products").Product[] {
+  const rows = all<ProductRow>(
+    includeInactive
+      ? "SELECT * FROM products ORDER BY created_at"
+      : "SELECT * FROM products WHERE active = 1 ORDER BY created_at",
+  );
+  return rows.map(rowToProduct);
+}
+
+export function productFromDB(id: string): import("../data/products").Product | undefined {
+  const row = all<ProductRow>("SELECT * FROM products WHERE id = ?", [id])[0];
+  return row ? rowToProduct(row) : undefined;
+}
+
+/** Crear o actualizar producto (Panel de Staff). `initialStock` se usa solo para variantes nuevas. */
+export function upsertProduct(
+  p: import("../data/products").Product,
+  initialStock: Record<string, number> = {},
+) {
+  run(
+    `INSERT INTO products (id, sku, name, category, price, compare_at, tag, image, description,
+       details, colors, sizes, closures, active, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       sku = excluded.sku, name = excluded.name, category = excluded.category,
+       price = excluded.price, compare_at = excluded.compare_at, tag = excluded.tag,
+       image = excluded.image, description = excluded.description, details = excluded.details,
+       colors = excluded.colors, sizes = excluded.sizes, closures = excluded.closures`,
+    [
+      p.id, p.sku, p.name, p.category, p.price, p.compareAt ?? null, p.tag ?? null,
+      p.image, p.description, JSON.stringify(p.details), JSON.stringify(p.colors),
+      p.sizes ? JSON.stringify(p.sizes) : null, p.closures ? JSON.stringify(p.closures) : null,
+      Date.now(),
+    ],
+  );
+  for (const v of p.sizes ?? p.closures ?? []) {
+    run("INSERT OR IGNORE INTO stock (product_id, variant, units) VALUES (?, ?, ?)", [
+      p.id, v, initialStock[v] ?? 10,
+    ]);
+  }
+}
+
+export function setProductActive(id: string, active: boolean) {
+  run("UPDATE products SET active = ? WHERE id = ?", [active ? 1 : 0, id]);
+}
+
+export function deleteProduct(id: string) {
+  run("DELETE FROM products WHERE id = ?", [id]);
+  if (!db) return;
+  db.run("DELETE FROM stock WHERE product_id = ?", [id]);
+  db.run("DELETE FROM cart WHERE product_id = ?", [id]);
+  db.run("DELETE FROM wishlist WHERE product_id = ?", [id]);
+  db.run("DELETE FROM restock_alerts WHERE product_id = ?", [id]);
+  db.run("DELETE FROM reviews WHERE product_id = ?", [id]);
+  persist(db);
+  bump();
+}
+
+export function setVariantStock(productId: string, variant: string, units: number) {
+  const u = Math.max(0, Math.round(units));
+  run(
+    `INSERT INTO stock (product_id, variant, units) VALUES (?, ?, ?)
+     ON CONFLICT(product_id, variant) DO UPDATE SET units = ?`,
+    [productId, variant, u, u],
+  );
+}
+
 function variantOf(line: { productId: string; size?: string; closure?: string }) {
   return line.size || line.closure || "";
 }
@@ -277,11 +422,11 @@ export function addToCart(
 ): { ok: boolean; note: string } {
   const variant = sel.size ?? sel.closure ?? "";
   const left = unitsLeft(p.id, variant);
-  if (left <= 0) return { ok: false, note: `Sold out — ${variant}` };
+  if (left <= 0) return { ok: false, note: `Agotado — ${variant}` };
   const key = `${p.id}|${sel.color.name}|${sel.size ?? ""}|${sel.closure ?? ""}`;
   const current = all<{ qty: number }>("SELECT qty FROM cart WHERE line_key = ?", [key])[0]?.qty ?? 0;
   const next = Math.min(left, current + qty, 99);
-  if (next === current) return { ok: false, note: `Only ${left} in stock for ${variant}` };
+  if (next === current) return { ok: false, note: `Solo quedan ${left} unidades de ${variant}` };
   run(
     `INSERT INTO cart (line_key, product_id, name, image, price, color_name, color_hex, size, closure, qty)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -365,6 +510,11 @@ export function advanceOrder(id: string) {
   if (!order) return;
   const next = ORDER_FLOW[Math.min(ORDER_FLOW.indexOf(order.status) + 1, ORDER_FLOW.length - 1)];
   run("UPDATE orders SET status = ? WHERE id = ?", [next, id]);
+}
+
+/** Cambio directo de estado (lo usa el Panel de Staff) */
+export function setOrderStatus(id: string, status: OrderStatus) {
+  run("UPDATE orders SET status = ? WHERE id = ?", [status, id]);
 }
 
 /* --------------------------------- promos -------------------------------- */
@@ -478,6 +628,9 @@ export function resetDB() {
   db.run("DELETE FROM reviews");
   db.run("DELETE FROM restock_alerts");
   db.run("DELETE FROM stock");
+  db.run("DELETE FROM products");
+  db.run("DELETE FROM meta");
+  seed();
   for (const [key, units] of Object.entries(SEED_STOCK)) {
     const [pid, variant] = key.split("|");
     db.run("INSERT INTO stock (product_id, variant, units) VALUES (?, ?, ?)", [pid, variant, units]);
@@ -494,3 +647,14 @@ export function resetDB() {
 
 /* ------------------------------- misc exports ----------------------------- */
 export { productById, PRODUCTS };
+
+/** Exportación del archivo .db completo (Panel de Staff) */
+export function exportStoreDB(): Uint8Array {
+  if (!db) throw new Error("DB not ready");
+  return exportDB(db);
+}
+
+/** Consulta cruda de solo lectura para las vistas de datos del panel */
+export function allRows<T = Record<string, SqlValue>>(sql: string): T[] {
+  return all<T>(sql);
+}

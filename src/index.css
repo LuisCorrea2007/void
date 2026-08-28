@@ -2,7 +2,7 @@
 
 /* ---------------------------------------------------------------------------
    VLT/STRT design tokens — Tailwind v4 theme
-   Rich-black base, volt + grape accents, Anton display / Space Grotesk body
+   Base negro rico + trío púrpura: #6A0DAD (plum) · #733CA9 (grape) · #A785BC (volt)
 --------------------------------------------------------------------------- */
 @theme {
   --font-display: "Anton", "Arial Narrow", sans-serif;
@@ -14,9 +14,10 @@
   --color-seam: #2b2b2b;
   --color-bone: #f2f2ec;
   --color-ash: #9b9b90;
-  --color-volt: #c8f542;
-  --color-grape: #a06bff;
-  --color-ember: #ff6a55;
+  --color-volt: #a785bc;   /* acento primario */
+  --color-grape: #733ca9;  /* acento secundario */
+  --color-plum: #6a0dad;   /* profundo: bordes, glows, sellos */
+  --color-ember: #ff6a55;  /* color funcional: errores / última llamada */
 
   --animate-marquee: marquee 30s linear infinite;
   --animate-marquee-rev: marquee-rev 34s linear infinite;
@@ -87,7 +88,7 @@ body {
   border: 2px solid var(--color-ink);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-volt);
+  background: var(--color-grape);
 }
 
 /* --------------------------- custom utilities --------------------------- */
@@ -101,8 +102,8 @@ body {
 }
 @utility bg-grid {
   background-image:
-    linear-gradient(to right, rgb(255 255 255 / 0.035) 1px, transparent 1px),
-    linear-gradient(to bottom, rgb(255 255 255 / 0.035) 1px, transparent 1px);
+    linear-gradient(to right, rgb(167 133 188 / 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(167 133 188 / 0.05) 1px, transparent 1px);
   background-size: 44px 44px;
 }
 @utility no-scrollbar {
@@ -128,7 +129,6 @@ body {
   transform: none;
 }
 
-/* range/number input reset for qty steppers */
 button {
   -webkit-tap-highlight-color: transparent;
 }

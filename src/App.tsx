@@ -1,27 +1,26 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Navbar from "./components/Navbar";
 import Ticker from "./components/Ticker";
 import Hero from "./components/Hero";
 import Catalog, { type SortKey } from "./components/Catalog";
-
-/* Three.js lives in its own chunk — loaded on demand */
-const CapLab = lazy(() => import("./components/CapLab"));
 import ProductModal, { type Selection } from "./components/ProductModal";
 import CartDrawer from "./components/CartDrawer";
 import OrdersDrawer from "./components/OrdersDrawer";
 import CheckoutModal from "./components/CheckoutModal";
 import DBConsole from "./components/DBConsole";
+import StaffPanel from "./components/StaffPanel";
 import BootScreen from "./components/BootScreen";
 import { CapBanner, LedgerStrip, Newsletter } from "./components/Extras";
 import Footer from "./components/Footer";
 import { IconBag, IconBolt } from "./components/icons";
-import { PRODUCTS, STORE, TICKER_ITEMS, fmt, type Category, type ColorOpt, type Product } from "./data/products";
+import { TICKER_ITEMS, fmt, type Category, type Product } from "./data/products";
 import {
   addToCart as dbAddToCart,
   advanceOrder,
   consumeBootNotes,
   getCart,
   getOrders,
+  getProducts,
   getStock,
   getWishlist,
   initDB,
@@ -33,10 +32,12 @@ import {
   type Order,
 } from "./lib/db";
 
+const CapLab = lazy(() => import("./components/CapLab"));
+
 type Toast = { id: number; title: string; sub: string; kind: "ok" | "err" };
 
 export default function App() {
-  /* ------------------------------ db boot -------------------------------- */
+  /* ------------------------------ arranque BD ----------------------------- */
   const [boot, setBoot] = useState<"booting" | "ready" | "error">("booting");
   const [bootError, setBootError] = useState("");
 
@@ -46,7 +47,7 @@ export default function App() {
       .then(() => setBoot("ready"))
       .catch((e) => {
         console.error(e);
-        setBootError(e?.message ?? "Unknown database error");
+        setBootError(e?.message ?? "Error desconocido de la base de datos");
         setBoot("error");
       });
   }, []);
@@ -55,10 +56,11 @@ export default function App() {
     bootDB();
   }, [bootDB]);
 
-  /* ------------------------------ ui state ------------------------------- */
+  /* ------------------------------ estado de UI ---------------------------- */
   const [cartOpen, setCartOpen] = useState(false);
   const [ordersOpen, setOrdersOpen] = useState(false);
   const [consoleOpen, setConsoleOpen] = useState(false);
+  const [staffOpen, setStaffOpen] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [active, setActive] = useState<Product | null>(null);
   const [labPreset, setLabPreset] = useState<string | null>(null);
@@ -68,34 +70,25 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [bumpKey, setBumpKey] = useState(0);
   const catalogRef = useRef<HTMLElement>(null);
-  const labRef = useRef<HTMLDivElement>(null);
 
-  /* --------------------------- live db snapshot --------------------------- */
+  /* --------------------------- snapshot vivo de la BD ---------------------- */
   const dbv = useDB();
-  const cart = useMemo(
-    () => (boot === "ready" ? getCart() : []),
-    [boot, dbv], // eslint-disable-line react-hooks/exhaustive-deps
-  );
-  const orders = useMemo(
-    () => (boot === "ready" ? getOrders() : []),
-    [boot, dbv], // eslint-disable-line react-hooks/exhaustive-deps
-  );
-  const wishlist = useMemo(
-    () => (boot === "ready" ? getWishlist() : []),
-    [boot, dbv], // eslint-disable-line react-hooks/exhaustive-deps
-  );
+  const cart = useMemo(() => (boot === "ready" ? getCart() : []), [boot, dbv]);
+  const orders = useMemo(() => (boot === "ready" ? getOrders() : []), [boot, dbv]);
+  const wishlist = useMemo(() => (boot === "ready" ? getWishlist() : []), [boot, dbv]);
+  const products = useMemo(() => (boot === "ready" ? getProducts() : []), [boot, dbv]);
   const stockMap = useMemo(
     () =>
       boot === "ready"
-        ? Object.fromEntries(PRODUCTS.map((p) => [p.id, getStock(p.id)]))
+        ? Object.fromEntries(products.map((p) => [p.id, getStock(p.id)]))
         : {},
-    [boot, dbv], // eslint-disable-line react-hooks/exhaustive-deps
+    [boot, dbv, products],
   );
 
   const count = cart.reduce((n, l) => n + l.qty, 0);
   const subtotal = cart.reduce((n, l) => n + l.price * l.qty, 0);
 
-  /* ------------------------------ navigation ------------------------------ */
+  /* ------------------------------ navegación ------------------------------ */
   const scrollToCatalog = useCallback(() => {
     catalogRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, []);
@@ -121,22 +114,22 @@ export default function App() {
     setToasts((t) => [...t.slice(-2), { id, title, sub, kind }]);
   }, []);
 
-  /* boot notes → toasts (cart reconciled against stock, etc.) */
+  /* notas de arranque → toasts (carrito conciliado con el stock, etc.) */
   useEffect(() => {
     if (boot !== "ready") return;
-    consumeBootNotes().forEach((note) => pushToast("Database synced", note));
+    consumeBootNotes().forEach((note) => pushToast("Base de datos sincronizada", note));
   }, [boot, pushToast]);
 
-  /* -------------------------------- cart ops ------------------------------ */
+  /* ------------------------------- carrito -------------------------------- */
   const handleAdd = useCallback(
     (p: Product, sel: Selection) => {
       const res = dbAddToCart(p, sel, sel.qty);
       if (res.ok) {
         setBumpKey((k) => k + 1);
-        pushToast(`Added to cart ×${sel.qty}`, res.note);
+        pushToast(`Añadido al carrito ×${sel.qty}`, res.note);
         setActive(null);
       } else {
-        pushToast("Can't add", res.note, "err");
+        pushToast("No se pudo añadir", res.note, "err");
       }
     },
     [pushToast],
@@ -145,10 +138,9 @@ export default function App() {
   const quickAdd = useCallback(
     (p: Product) => {
       const stock = stockMap[p.id] ?? {};
-      const variant =
-        (p.sizes ?? p.closures ?? []).find((v) => (stock[v] ?? 0) > 0) ?? null;
+      const variant = (p.sizes ?? p.closures ?? []).find((v) => (stock[v] ?? 0) > 0) ?? null;
       if (!variant) {
-        pushToast("Sold out", `${p.name} — every variant is gone.`, "err");
+        pushToast("Agotado", `${p.name} — no queda ninguna variante.`, "err");
         return;
       }
       const sel: Selection = p.sizes
@@ -173,7 +165,7 @@ export default function App() {
     [stockMap],
   );
 
-  /* ------------------------------- orders --------------------------------- */
+  /* -------------------------------- pedidos ------------------------------- */
   const handlePlace = useCallback(
     (customer: Order["customer"], payment: "cod" | "transfer", discountPct: number) =>
       placeOrder(
@@ -199,30 +191,36 @@ export default function App() {
       let added = 0;
       let skipped = 0;
       for (const it of o.items) {
-        const p = PRODUCTS.find((x) => x.id === it.productId);
-        if (!p) continue;
+        const p = products.find((x) => x.id === it.productId);
+        if (!p) {
+          skipped++;
+          continue;
+        }
         const res = dbAddToCart(p, { color: it.color, size: it.size, closure: it.closure }, it.qty);
-        res.ok ? added++ : skipped++;
+        if (res.ok) added++;
+        else skipped++;
       }
       setOrdersOpen(false);
       setCartOpen(true);
       setBumpKey((k) => k + 1);
       pushToast(
-        "Reorder loaded",
-        skipped > 0 ? `${added} item(s) added — ${skipped} sold out since then.` : `${added} item(s) back in your cart.`,
+        "Pedido repetido",
+        skipped > 0
+          ? `${added} artículo(s) añadidos — ${skipped} sin stock actualmente.`
+          : `${added} artículo(s) de vuelta en tu carrito.`,
         skipped > 0 ? "err" : "ok",
       );
     },
-    [pushToast],
+    [products, pushToast],
   );
 
   const finishCheckout = useCallback(() => {
     setCheckoutOpen(false);
-    pushToast("Order sent", "Saved to the orders table — confirm it on WhatsApp.");
+    pushToast("Pedido enviado", "Guardado en la tabla orders — confírmalo por WhatsApp.");
   }, [pushToast]);
 
-  /* ------------------- overlays: escape + scroll lock --------------------- */
-  const anyOverlay = cartOpen || checkoutOpen || ordersOpen || consoleOpen || active !== null;
+  /* ------------------- overlays: escape + bloqueo de scroll --------------- */
+  const anyOverlay = cartOpen || checkoutOpen || ordersOpen || consoleOpen || staffOpen || active !== null;
 
   useEffect(() => {
     document.body.style.overflow = anyOverlay ? "hidden" : "";
@@ -236,13 +234,14 @@ export default function App() {
       if (e.key !== "Escape") return;
       if (checkoutOpen) setCheckoutOpen(false);
       else if (active) setActive(null);
+      else if (staffOpen) setStaffOpen(false);
       else if (consoleOpen) setConsoleOpen(false);
       else if (ordersOpen) setOrdersOpen(false);
       else if (cartOpen) setCartOpen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [checkoutOpen, active, consoleOpen, ordersOpen, cartOpen]);
+  }, [checkoutOpen, active, staffOpen, consoleOpen, ordersOpen, cartOpen]);
 
   /* -------------------------------- render -------------------------------- */
   if (boot !== "ready") {
@@ -256,8 +255,10 @@ export default function App() {
         cartCount={count}
         bumpKey={bumpKey}
         ordersCount={orders.length}
+        products={products}
         onOpenCart={() => setCartOpen(true)}
         onOpenOrders={() => setOrdersOpen(true)}
+        onOpenStaff={() => setStaffOpen(true)}
         onNav={handleNav}
         onOpenProduct={setActive}
       />
@@ -267,37 +268,39 @@ export default function App() {
         <Ticker items={TICKER_ITEMS} reverse accent />
         <Catalog
           sectionRef={catalogRef}
+          products={products}
           filter={filter}
           sort={sort}
           stock={stockMap}
           wishlist={wishlist}
           savedOnly={savedOnly}
-          onFilter={(c) => { setSavedOnly(false); setFilter(c); }}
+          onFilter={(c) => {
+            setSavedOnly(false);
+            setFilter(c);
+          }}
           onSort={setSort}
           onToggleSaved={() => setSavedOnly((v) => !v)}
           onOpen={setActive}
           onQuickAdd={quickAdd}
           onToggleWish={(p) => toggleWishlist(p.id)}
         />
-        <div ref={labRef}>
-          <Suspense
-            fallback={
-              <div className="grid h-[420px] place-items-center border-y border-seam bg-coal/60">
-                <p className="flex items-center gap-3 text-[12px] font-bold uppercase tracking-[0.2em] text-ash">
-                  <span className="h-2 w-2 animate-blink bg-volt" /> Loading 3D engine…
-                </p>
-              </div>
-            }
-          >
-            <CapLab presetId={labPreset} onAdd={(p, sel) => handleAdd(p, { color: sel.color as ColorOpt, closure: sel.closure, qty: sel.qty })} />
-          </Suspense>
-        </div>
+        <Suspense
+          fallback={
+            <div className="grid h-[420px] place-items-center border-y border-seam bg-coal/60">
+              <p className="flex items-center gap-3 text-[12px] font-bold uppercase tracking-[0.2em] text-ash">
+                <span className="h-2 w-2 animate-blink bg-volt" /> Cargando motor 3D…
+              </p>
+            </div>
+          }
+        >
+          <CapLab presetId={labPreset} onAdd={(p, sel) => handleAdd(p, { color: sel.color, closure: sel.closure, qty: sel.qty })} />
+        </Suspense>
         <CapBanner onCaps={() => handleNav("caps")} />
         <LedgerStrip />
         <Newsletter />
       </main>
 
-      <Footer onNav={handleNav} onOpenConsole={() => setConsoleOpen(true)} />
+      <Footer onNav={handleNav} onOpenConsole={() => setConsoleOpen(true)} onOpenStaff={() => setStaffOpen(true)} />
 
       {/* ------------------------------ overlays ---------------------------- */}
       <CartDrawer
@@ -332,6 +335,7 @@ export default function App() {
       />
 
       <DBConsole open={consoleOpen} onClose={() => setConsoleOpen(false)} />
+      <StaffPanel open={staffOpen} onClose={() => setStaffOpen(false)} />
 
       {active && (
         <ProductModal
@@ -372,7 +376,7 @@ export default function App() {
         ))}
       </div>
 
-      {/* mobile quick-cart bar */}
+      {/* barra rápida de carrito en móvil */}
       {count > 0 && !anyOverlay && (
         <div className="fixed inset-x-0 bottom-0 z-40 border-t border-volt/40 bg-ink/95 p-3 backdrop-blur-md md:hidden">
           <button
@@ -380,15 +384,15 @@ export default function App() {
             className="flex w-full items-center justify-between bg-volt px-5 py-3.5 text-ink transition-transform active:scale-[0.98]"
           >
             <span className="flex items-center gap-2.5 text-[12px] font-bold uppercase tracking-[0.16em]">
-              <IconBag className="w-4 h-4" />
-              View cart · {count} {count === 1 ? "item" : "items"}
+              <IconBag className="h-4 w-4" />
+              Ver carrito · {count} {count === 1 ? "artículo" : "artículos"}
             </span>
             <span className="font-display text-xl">{fmt(subtotal)}</span>
           </button>
         </div>
       )}
 
-      {/* film grain over everything */}
+      {/* grano de película sobre todo */}
       <div aria-hidden className="grain pointer-events-none fixed inset-0 z-[90] opacity-[0.05]" />
     </div>
   );
@@ -422,7 +426,7 @@ function ToastCard({
           toast.kind === "ok" ? "bg-volt/15 text-volt" : "bg-ember/15 text-ember"
         }`}
       >
-        <IconBolt className="w-4 h-4" />
+        <IconBolt className="h-4 w-4" />
       </span>
       <span className="min-w-0">
         <span className="block truncate text-[13px] font-bold uppercase tracking-wide">{toast.title}</span>

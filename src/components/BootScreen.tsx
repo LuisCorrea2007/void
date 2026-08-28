@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import { IconBolt } from "./icons";
 
 const STEPS = [
-  "loading SQLite engine (WASM)…",
-  "opening browser database (IndexedDB)…",
-  "CREATE TABLE stock, cart, orders, reviews…",
-  "seeding drop 004 inventory…",
-  "reconciling cart against live stock…",
+  "cargando motor SQLite (WASM)…",
+  "abriendo base de datos (IndexedDB)…",
+  "CREATE TABLE products, stock, cart, orders…",
+  "sembrando inventario del drop 004…",
+  "conciliando carrito con el stock en vivo…",
 ];
 
 /* Boot gate — shown while the SQLite WASM database initializes */
@@ -36,15 +36,15 @@ export default function BootScreen({ error, onRetry }: { error?: string; onRetry
             <>
               <p className="text-ember">✗ {error}</p>
               <p className="mt-2 text-ash">
-                The local database engine failed to start. Your browser may block
-                WebAssembly or IndexedDB in this context.
+                El motor de base de datos local no pudo iniciar. Puede que tu navegador bloquee
+                WebAssembly o IndexedDB en este contexto.
               </p>
               {onRetry && (
                 <button
                   onClick={onRetry}
                   className="mt-5 bg-volt px-5 py-3 text-[12px] font-bold uppercase tracking-[0.16em] text-ink transition-transform hover:-translate-y-0.5"
                 >
-                  Retry boot
+                  Reintentar arranque
                 </button>
               )}
             </>
@@ -73,7 +73,7 @@ export default function BootScreen({ error, onRetry }: { error?: string; onRetry
         </div>
 
         <p className="mt-4 text-center text-[10px] uppercase tracking-[0.24em] text-ash">
-          SQLite · WebAssembly · persisted in IndexedDB
+          SQLite · WebAssembly · persistida en IndexedDB
         </p>
       </div>
     </div>
