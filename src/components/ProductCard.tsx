@@ -1,5 +1,18 @@
 import { fmt, type Product } from "../data/products";
+import { getRating, useDB } from "../lib/db";
 import { IconHeart, IconPlus } from "./icons";
+
+/* live rating pill — reads straight from the reviews table */
+function RatingPill({ productId }: { productId: string }) {
+  useDB();
+  const r = getRating(productId);
+  if (r.count === 0) return null;
+  return (
+    <span className="ml-2 text-[10px] font-bold tracking-wide text-volt" title={`${r.count} review(s)`}>
+      ★ {r.avg.toFixed(1)} <span className="font-normal text-ash">({r.count})</span>
+    </span>
+  );
+}
 
 const tagStyle: Record<string, string> = {
   NEW: "bg-volt text-ink",
@@ -99,7 +112,7 @@ export default function ProductCard({
             className="absolute inset-x-0 bottom-0 flex translate-y-full items-center justify-center gap-2 bg-volt py-3 text-[12px] font-bold uppercase tracking-[0.18em] text-ink transition-transform duration-300 ease-out group-hover:translate-y-0 focus-visible:translate-y-0"
           >
             <IconPlus className="w-3.5 h-3.5" />
-            {product.sizes ? "Choose size" : "Quick add"}
+            Quick add
           </button>
         )}
       </div>
@@ -108,6 +121,7 @@ export default function ProductCard({
       <div className="p-4">
         <p className="text-[10px] uppercase tracking-[0.2em] text-ash">
           {product.category} · {product.sku}
+          <RatingPill productId={product.id} />
         </p>
         <h3
           className={`mt-1.5 text-[15px] font-bold uppercase leading-snug tracking-wide transition-colors ${

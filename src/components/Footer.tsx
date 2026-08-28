@@ -1,8 +1,14 @@
 import { STORE, CATEGORIES, type Category } from "../data/products";
-import { IconArrow, IconBolt, IconWhatsApp } from "./icons";
+import { IconArrow, IconBolt, IconDatabase, IconWhatsApp } from "./icons";
 
 /* Footer: giant wordmark, functional shop links, contact + payment chips */
-export default function Footer({ onNav }: { onNav: (c: Category | "all") => void }) {
+export default function Footer({
+  onNav,
+  onOpenConsole,
+}: {
+  onNav: (c: Category | "all") => void;
+  onOpenConsole: () => void;
+}) {
   return (
     <footer className="relative overflow-hidden pb-24 md:pb-0">
       <div className="mx-auto max-w-7xl px-4 pt-14 sm:px-6">
@@ -108,13 +114,23 @@ export default function Footer({ onNav }: { onNav: (c: Category | "all") => void
         {/* bottom bar */}
         <div className="mt-10 flex flex-wrap items-center justify-between gap-3 border-t border-seam py-6 text-[11px] uppercase tracking-[0.18em] text-ash">
           <p>© 2026 VLT/STRT — Built loud, shipped fast.</p>
-          <button
-            onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-            className="group flex items-center gap-2 transition-colors hover:text-volt"
-          >
-            Back to top
-            <IconArrow className="w-3.5 h-3.5 -rotate-90 transition-transform group-hover:-translate-y-0.5" />
-          </button>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={onOpenConsole}
+              className="group flex items-center gap-2 transition-colors hover:text-grape"
+              title="Open the live SQL console"
+            >
+              <IconDatabase className="w-3.5 h-3.5" />
+              SQL Console
+            </button>
+            <button
+              onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+              className="group flex items-center gap-2 transition-colors hover:text-volt"
+            >
+              Back to top
+              <IconArrow className="w-3.5 h-3.5 -rotate-90 transition-transform group-hover:-translate-y-0.5" />
+            </button>
+          </div>
         </div>
       </div>
     </footer>

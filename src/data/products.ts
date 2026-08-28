@@ -47,10 +47,11 @@ export const STORE = {
 export const TICKER_ITEMS = [
   "FREE SHIPPING OVER $120",
   "DROP 004 — LIVE NOW",
+  "3D CAP LAB — SPIN YOUR FIT",
+  "CODE STREET10 = 10% OFF",
   "MANUAL PAY: COD / TRANSFER",
   "48H DISPATCH, WORLDWIDE",
-  "CODE STREET10 = 10% OFF",
-  "NEW: VOLT CLASSIC SNAPBACK",
+  "LIVE STOCK — WHEN IT'S GONE, IT'S GONE",
 ];
 
 export const CATEGORIES: { id: Category | "all"; label: string }[] = [

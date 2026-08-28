@@ -95,6 +95,14 @@ export const IconWhatsApp = ({ className = "w-5 h-5" }: P) => (
   </svg>
 );
 
+export const IconDatabase = ({ className = "w-5 h-5" }: P) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={`${base} ${className}`} aria-hidden>
+    <ellipse cx="12" cy="5.5" rx="7.5" ry="2.8" />
+    <path d="M4.5 5.5v13c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8v-13" />
+    <path d="M4.5 12c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8" />
+  </svg>
+);
+
 export const IconReceipt = ({ className = "w-5 h-5" }: P) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={`${base} ${className}`} aria-hidden>
     <path d="M6 3.5h12V21l-2.4-1.5L13.2 21l-2.4-1.5L8.4 21 6 19.5V3.5Z" strokeLinejoin="round" />

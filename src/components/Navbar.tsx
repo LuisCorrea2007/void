@@ -148,6 +148,14 @@ export default function Navbar({
               <span className="absolute -bottom-1.5 left-0 h-px w-0 bg-volt transition-all duration-300 group-hover:w-full" />
             </button>
           ))}
+          <a
+            href="#lab"
+            className="group relative flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-[0.18em] text-grape transition-colors hover:text-bone"
+          >
+            <span className="h-1.5 w-1.5 animate-blink rounded-full bg-grape" />
+            3D Lab
+            <span className="absolute -bottom-1.5 left-0 h-px w-0 bg-grape transition-all duration-300 group-hover:w-full" />
+          </a>
         </div>
 
         <div className="ml-auto flex items-center gap-2 sm:gap-3">

@@ -1,266 +1,228 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Navbar from "./components/Navbar";
 import Ticker from "./components/Ticker";
 import Hero from "./components/Hero";
 import Catalog, { type SortKey } from "./components/Catalog";
+
+/* Three.js lives in its own chunk — loaded on demand */
+const CapLab = lazy(() => import("./components/CapLab"));
 import ProductModal, { type Selection } from "./components/ProductModal";
 import CartDrawer from "./components/CartDrawer";
-import CheckoutModal from "./components/CheckoutModal";
 import OrdersDrawer from "./components/OrdersDrawer";
+import CheckoutModal from "./components/CheckoutModal";
+import DBConsole from "./components/DBConsole";
+import BootScreen from "./components/BootScreen";
 import { CapBanner, LedgerStrip, Newsletter } from "./components/Extras";
 import Footer from "./components/Footer";
 import { IconBag, IconBolt } from "./components/icons";
+import { PRODUCTS, STORE, TICKER_ITEMS, fmt, type Category, type ColorOpt, type Product } from "./data/products";
 import {
-  STORE,
-  TICKER_ITEMS,
-  fmt,
-  productById,
-  type CartLine,
-  type Category,
-  type Product,
-} from "./data/products";
-import {
-  advanceOrderStatus,
-  createOrder,
+  addToCart as dbAddToCart,
+  advanceOrder,
+  consumeBootNotes,
+  getCart,
+  getOrders,
+  getStock,
+  getWishlist,
+  initDB,
+  placeOrder,
+  removeCartLine,
+  setCartQty,
   toggleWishlist,
   useDB,
-  variantOf,
-  variantStock,
   type Order,
 } from "./lib/db";
 
-const CART_KEY = "vltstrt_cart_v1";
-
-/* cart survives refreshes — same local database philosophy as the rest */
-function loadCart(): CartLine[] {
-  try {
-    const raw = localStorage.getItem(CART_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as CartLine[];
-    return Array.isArray(parsed) ? parsed.filter((l) => l && l.key && l.productId) : [];
-  } catch {
-    return [];
-  }
-}
-
-type Toast = { id: number; title: string; sub: string };
+type Toast = { id: number; title: string; sub: string; kind: "ok" | "err" };
 
 export default function App() {
-  /* ------------------------- database (reactive) ------------------------- */
-  const db = useDB();
+  /* ------------------------------ db boot -------------------------------- */
+  const [boot, setBoot] = useState<"booting" | "ready" | "error">("booting");
+  const [bootError, setBootError] = useState("");
 
-  /* ------------------------------ store state ---------------------------- */
-  const [lines, setLines] = useState<CartLine[]>(loadCart);
+  const bootDB = useCallback(() => {
+    setBoot("booting");
+    initDB()
+      .then(() => setBoot("ready"))
+      .catch((e) => {
+        console.error(e);
+        setBootError(e?.message ?? "Unknown database error");
+        setBoot("error");
+      });
+  }, []);
+
+  useEffect(() => {
+    bootDB();
+  }, [bootDB]);
+
+  /* ------------------------------ ui state ------------------------------- */
   const [cartOpen, setCartOpen] = useState(false);
-  const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [ordersOpen, setOrdersOpen] = useState(false);
+  const [consoleOpen, setConsoleOpen] = useState(false);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [active, setActive] = useState<Product | null>(null);
+  const [labPreset, setLabPreset] = useState<string | null>(null);
   const [filter, setFilter] = useState<Category | "all">("all");
-  const [sort, setSort] = useState<SortKey>("featured");
   const [savedOnly, setSavedOnly] = useState(false);
+  const [sort, setSort] = useState<SortKey>("featured");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [bumpKey, setBumpKey] = useState(0);
   const catalogRef = useRef<HTMLElement>(null);
+  const labRef = useRef<HTMLDivElement>(null);
 
-  const count = useMemo(() => lines.reduce((n, l) => n + l.qty, 0), [lines]);
-  const subtotal = useMemo(() => lines.reduce((n, l) => n + l.price * l.qty, 0), [lines]);
+  /* --------------------------- live db snapshot --------------------------- */
+  const dbv = useDB();
+  const cart = useMemo(
+    () => (boot === "ready" ? getCart() : []),
+    [boot, dbv], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const orders = useMemo(
+    () => (boot === "ready" ? getOrders() : []),
+    [boot, dbv], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const wishlist = useMemo(
+    () => (boot === "ready" ? getWishlist() : []),
+    [boot, dbv], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const stockMap = useMemo(
+    () =>
+      boot === "ready"
+        ? Object.fromEntries(PRODUCTS.map((p) => [p.id, getStock(p.id)]))
+        : {},
+    [boot, dbv], // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
-  /* --------------------------- toasts + nav ------------------------------ */
-  const pushToast = useCallback((title: string, sub: string) => {
-    const id = Date.now() + Math.random();
-    setToasts((t) => [...t.slice(-2), { id, title, sub }]);
-  }, []);
+  const count = cart.reduce((n, l) => n + l.qty, 0);
+  const subtotal = cart.reduce((n, l) => n + l.price * l.qty, 0);
 
+  /* ------------------------------ navigation ------------------------------ */
   const scrollToCatalog = useCallback(() => {
     catalogRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, []);
 
   const handleNav = useCallback(
     (cat: Category | "all") => {
-      setFilter(cat);
       setSavedOnly(false);
+      setFilter(cat);
       scrollToCatalog();
     },
     [scrollToCatalog],
   );
 
-  /* ------------------------- cart <-> stock sync -------------------------- */
-  useEffect(() => {
-    localStorage.setItem(CART_KEY, JSON.stringify(lines));
-  }, [lines]);
-
-  /* on load: clamp saved cart against live inventory */
-  useEffect(() => {
-    const next = lines.flatMap((l) => {
-      const p = productById(l.productId);
-      if (!p) return [];
-      const have = variantStock(db.stock, p.id, variantOf(l));
-      if (have <= 0) return [];
-      return l.qty > have ? [{ ...l, qty: have }] : [l];
-    });
-    if (JSON.stringify(next) !== JSON.stringify(lines)) {
-      setLines(next);
-      pushToast("Stock updated", "Your saved cart was adjusted to live inventory.");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  const openIn3D = useCallback((p: Product) => {
+    setActive(null);
+    setLabPreset(p.id);
+    document.getElementById("lab")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, []);
 
-  /* ------------------------------- cart ops ------------------------------ */
-  const addToCart = useCallback(
-    (p: Product, sel: Selection, silent = false): number => {
-      const variant = variantOf(sel);
-      const have = variantStock(db.stock, p.id, variant);
-      const key = `${p.id}|${sel.color.name}|${sel.size ?? ""}|${sel.closure ?? ""}`;
-      const existing = lines.find((l) => l.key === key)?.qty ?? 0;
-      const room = have - existing;
-      if (room <= 0) {
-        if (!silent) pushToast("No more stock", `${p.name} — ${variant} is sold out.`);
-        return 0;
-      }
-      const add = Math.min(sel.qty, room);
-      setLines((prev) => {
-        const found = prev.find((l) => l.key === key);
-        if (found) return prev.map((l) => (l.key === key ? { ...l, qty: l.qty + add } : l));
-        return [
-          ...prev,
-          {
-            key,
-            productId: p.id,
-            name: p.name,
-            image: p.image,
-            price: p.price,
-            color: sel.color,
-            size: sel.size,
-            closure: sel.closure,
-            qty: add,
-          },
-        ];
-      });
-      setBumpKey((k) => k + 1);
-      if (!silent) {
-        const label = [sel.color.name, sel.size, sel.closure].filter(Boolean).join(" · ");
-        pushToast(
-          add < sel.qty ? `Only ${add} added — stock limit` : `Added to cart ×${add}`,
-          `${p.name} — ${label}`,
-        );
-      }
-      setActive(null);
-      return add;
-    },
-    [db.stock, lines, pushToast],
-  );
-
-  /* quick add from card: clothing needs a size → modal; caps add directly */
-  const quickAdd = useCallback(
-    (p: Product) => {
-      if (p.sizes) {
-        setActive(p);
-        return;
-      }
-      const variant = (p.closures ?? ["default"]).find((c) => variantStock(db.stock, p.id, c) > 0);
-      if (!variant) {
-        pushToast("Sold out", `${p.name} has no units left.`);
-        return;
-      }
-      addToCart(p, { color: p.colors[0], closure: variant === "default" ? undefined : variant, qty: 1 });
-    },
-    [db.stock, addToCart, pushToast],
-  );
-
-  const updateQty = useCallback(
-    (key: string, delta: number) => {
-      setLines((prev) =>
-        prev.map((l) => {
-          if (l.key !== key) return l;
-          const have = Math.max(1, variantStock(db.stock, l.productId, variantOf(l)));
-          return { ...l, qty: Math.max(1, Math.min(have, l.qty + delta)) };
-        }),
-      );
-    },
-    [db.stock],
-  );
-
-  const maxQty = useCallback(
-    (l: CartLine) => Math.max(1, variantStock(db.stock, l.productId, variantOf(l))),
-    [db.stock],
-  );
-
-  const removeLine = useCallback((key: string) => {
-    setLines((prev) => prev.filter((l) => l.key !== key));
+  /* -------------------------------- toasts -------------------------------- */
+  const pushToast = useCallback((title: string, sub: string, kind: "ok" | "err" = "ok") => {
+    const id = Date.now() + Math.random();
+    setToasts((t) => [...t.slice(-2), { id, title, sub, kind }]);
   }, []);
 
-  /* ------------------------------ wishlist ------------------------------- */
-  const toggleWish = useCallback(
-    (p: Product) => {
-      const saved = toggleWishlist(p.id);
-      pushToast(saved ? "Saved to wishlist" : "Removed from wishlist", p.name);
+  /* boot notes → toasts (cart reconciled against stock, etc.) */
+  useEffect(() => {
+    if (boot !== "ready") return;
+    consumeBootNotes().forEach((note) => pushToast("Database synced", note));
+  }, [boot, pushToast]);
+
+  /* -------------------------------- cart ops ------------------------------ */
+  const handleAdd = useCallback(
+    (p: Product, sel: Selection) => {
+      const res = dbAddToCart(p, sel, sel.qty);
+      if (res.ok) {
+        setBumpKey((k) => k + 1);
+        pushToast(`Added to cart ×${sel.qty}`, res.note);
+        setActive(null);
+      } else {
+        pushToast("Can't add", res.note, "err");
+      }
     },
     [pushToast],
   );
 
-  /* ------------------------------ checkout -------------------------------- */
-  const placeOrder = useCallback(
-    (customer: { name: string; whatsapp: string; address: string }, payment: "cod" | "transfer"): Order => {
-      const sub = lines.reduce((n, l) => n + l.price * l.qty, 0);
-      const shipping = sub >= STORE.freeShipThreshold ? 0 : STORE.flatShip;
-      const order = createOrder({
-        items: lines,
-        subtotal: sub,
-        shipping,
-        total: sub + shipping,
-        payment,
-        customer,
-      });
-      setLines([]);
-      pushToast("Order created", `${order.id} saved — inventory updated.`);
-      return order;
+  const quickAdd = useCallback(
+    (p: Product) => {
+      const stock = stockMap[p.id] ?? {};
+      const variant =
+        (p.sizes ?? p.closures ?? []).find((v) => (stock[v] ?? 0) > 0) ?? null;
+      if (!variant) {
+        pushToast("Sold out", `${p.name} — every variant is gone.`, "err");
+        return;
+      }
+      const sel: Selection = p.sizes
+        ? { color: p.colors[0], size: variant, qty: 1 }
+        : { color: p.colors[0], closure: variant, qty: 1 };
+      handleAdd(p, sel);
     },
-    [lines, pushToast],
+    [stockMap, handleAdd, pushToast],
+  );
+
+  const updateQty = useCallback((key: string, delta: number) => {
+    const line = getCart().find((l) => l.key === key);
+    if (!line) return;
+    setCartQty(key, line.qty + delta);
+  }, []);
+
+  const maxQty = useCallback(
+    (l: { productId: string; size?: string; closure?: string }) => {
+      const variant = l.size || l.closure || "";
+      return Math.max(1, stockMap[l.productId]?.[variant] ?? 1);
+    },
+    [stockMap],
+  );
+
+  /* ------------------------------- orders --------------------------------- */
+  const handlePlace = useCallback(
+    (customer: Order["customer"], payment: "cod" | "transfer", discountPct: number) =>
+      placeOrder(
+        cart.map((l) => ({
+          productId: l.productId,
+          name: l.name,
+          image: l.image,
+          price: l.price,
+          color: l.color,
+          size: l.size,
+          closure: l.closure,
+          qty: l.qty,
+        })),
+        customer,
+        payment,
+        discountPct,
+      ),
+    [cart],
+  );
+
+  const handleReorder = useCallback(
+    (o: Order) => {
+      let added = 0;
+      let skipped = 0;
+      for (const it of o.items) {
+        const p = PRODUCTS.find((x) => x.id === it.productId);
+        if (!p) continue;
+        const res = dbAddToCart(p, { color: it.color, size: it.size, closure: it.closure }, it.qty);
+        res.ok ? added++ : skipped++;
+      }
+      setOrdersOpen(false);
+      setCartOpen(true);
+      setBumpKey((k) => k + 1);
+      pushToast(
+        "Reorder loaded",
+        skipped > 0 ? `${added} item(s) added — ${skipped} sold out since then.` : `${added} item(s) back in your cart.`,
+        skipped > 0 ? "err" : "ok",
+      );
+    },
+    [pushToast],
   );
 
   const finishCheckout = useCallback(() => {
     setCheckoutOpen(false);
-    pushToast("Order sent", "We'll confirm on WhatsApp shortly.");
+    pushToast("Order sent", "Saved to the orders table — confirm it on WhatsApp.");
   }, [pushToast]);
 
-  /* ------------------------------ orders ---------------------------------- */
-  const advance = useCallback(
-    (id: string) => {
-      advanceOrderStatus(id);
-      pushToast("Status updated", `${id} moved to the next step.`);
-    },
-    [pushToast],
-  );
-
-  const reorder = useCallback(
-    (o: Order) => {
-      let added = 0;
-      let skipped = 0;
-      o.items.forEach((it) => {
-        const p = productById(it.productId);
-        if (!p) {
-          skipped += it.qty;
-          return;
-        }
-        const got = addToCart(p, { color: it.color, size: it.size, closure: it.closure, qty: it.qty }, true);
-        added += got;
-        if (got < it.qty) skipped += it.qty - got;
-      });
-      if (added > 0) {
-        setOrdersOpen(false);
-        setCartOpen(true);
-        setBumpKey((k) => k + 1);
-      }
-      pushToast(
-        added > 0 ? `Reordered ×${added}` : "Nothing available",
-        skipped > 0 ? `${skipped} unit${skipped > 1 ? "s" : ""} skipped — out of stock now` : "All items back in your cart.",
-      );
-    },
-    [addToCart, pushToast],
-  );
-
-  /* -------------------- overlays: escape + scroll lock -------------------- */
-  const anyOverlay = cartOpen || checkoutOpen || ordersOpen || active !== null;
+  /* ------------------- overlays: escape + scroll lock --------------------- */
+  const anyOverlay = cartOpen || checkoutOpen || ordersOpen || consoleOpen || active !== null;
 
   useEffect(() => {
     document.body.style.overflow = anyOverlay ? "hidden" : "";
@@ -274,27 +236,26 @@ export default function App() {
       if (e.key !== "Escape") return;
       if (checkoutOpen) setCheckoutOpen(false);
       else if (active) setActive(null);
+      else if (consoleOpen) setConsoleOpen(false);
       else if (ordersOpen) setOrdersOpen(false);
       else if (cartOpen) setCartOpen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [checkoutOpen, active, ordersOpen, cartOpen]);
-
-  const startCheckout = () => {
-    if (lines.length === 0) return;
-    setCartOpen(false);
-    setCheckoutOpen(true);
-  };
+  }, [checkoutOpen, active, consoleOpen, ordersOpen, cartOpen]);
 
   /* -------------------------------- render -------------------------------- */
+  if (boot !== "ready") {
+    return <BootScreen error={boot === "error" ? bootError : undefined} onRetry={boot === "error" ? bootDB : undefined} />;
+  }
+
   return (
     <div className="min-h-screen bg-ink text-bone">
       <Ticker items={TICKER_ITEMS} />
       <Navbar
         cartCount={count}
         bumpKey={bumpKey}
-        ordersCount={db.orders.length}
+        ordersCount={orders.length}
         onOpenCart={() => setCartOpen(true)}
         onOpenOrders={() => setOrdersOpen(true)}
         onNav={handleNav}
@@ -308,33 +269,50 @@ export default function App() {
           sectionRef={catalogRef}
           filter={filter}
           sort={sort}
-          stock={db.stock}
-          wishlist={db.wishlist}
+          stock={stockMap}
+          wishlist={wishlist}
           savedOnly={savedOnly}
-          onFilter={setFilter}
+          onFilter={(c) => { setSavedOnly(false); setFilter(c); }}
           onSort={setSort}
           onToggleSaved={() => setSavedOnly((v) => !v)}
           onOpen={setActive}
           onQuickAdd={quickAdd}
-          onToggleWish={toggleWish}
+          onToggleWish={(p) => toggleWishlist(p.id)}
         />
+        <div ref={labRef}>
+          <Suspense
+            fallback={
+              <div className="grid h-[420px] place-items-center border-y border-seam bg-coal/60">
+                <p className="flex items-center gap-3 text-[12px] font-bold uppercase tracking-[0.2em] text-ash">
+                  <span className="h-2 w-2 animate-blink bg-volt" /> Loading 3D engine…
+                </p>
+              </div>
+            }
+          >
+            <CapLab presetId={labPreset} onAdd={(p, sel) => handleAdd(p, { color: sel.color as ColorOpt, closure: sel.closure, qty: sel.qty })} />
+          </Suspense>
+        </div>
         <CapBanner onCaps={() => handleNav("caps")} />
         <LedgerStrip />
         <Newsletter />
       </main>
 
-      <Footer onNav={handleNav} />
+      <Footer onNav={handleNav} onOpenConsole={() => setConsoleOpen(true)} />
 
       {/* ------------------------------ overlays ---------------------------- */}
       <CartDrawer
         open={cartOpen}
-        lines={lines}
+        lines={cart}
         subtotal={subtotal}
         maxQty={maxQty}
         onClose={() => setCartOpen(false)}
         onQty={updateQty}
-        onRemove={removeLine}
-        onCheckout={startCheckout}
+        onRemove={removeCartLine}
+        onCheckout={() => {
+          if (cart.length === 0) return;
+          setCartOpen(false);
+          setCheckoutOpen(true);
+        }}
         onBrowse={() => {
           setCartOpen(false);
           setTimeout(scrollToCatalog, 150);
@@ -343,36 +321,39 @@ export default function App() {
 
       <OrdersDrawer
         open={ordersOpen}
-        orders={db.orders}
+        orders={orders}
         onClose={() => setOrdersOpen(false)}
-        onAdvance={advance}
-        onReorder={reorder}
+        onAdvance={advanceOrder}
+        onReorder={handleReorder}
         onBrowse={() => {
           setOrdersOpen(false);
           setTimeout(scrollToCatalog, 150);
         }}
       />
 
+      <DBConsole open={consoleOpen} onClose={() => setConsoleOpen(false)} />
+
       {active && (
         <ProductModal
           product={active}
-          stock={db.stock[active.id] ?? {}}
+          stock={stockMap[active.id] ?? {}}
           onClose={() => setActive(null)}
-          onAdd={addToCart}
+          onAdd={handleAdd}
+          onOpen3D={openIn3D}
         />
       )}
 
-      {checkoutOpen && (
+      {checkoutOpen && cart.length > 0 && (
         <CheckoutModal
-          lines={lines}
+          lines={cart}
           subtotal={subtotal}
           onClose={() => setCheckoutOpen(false)}
-          onComplete={finishCheckout}
-          onPlace={placeOrder}
+          onPlace={handlePlace}
           onShowOrders={() => {
             setCheckoutOpen(false);
             setOrdersOpen(true);
           }}
+          onComplete={finishCheckout}
         />
       )}
 
@@ -392,7 +373,7 @@ export default function App() {
       </div>
 
       {/* mobile quick-cart bar */}
-      {count > 0 && !cartOpen && !checkoutOpen && !ordersOpen && !active && (
+      {count > 0 && !anyOverlay && (
         <div className="fixed inset-x-0 bottom-0 z-40 border-t border-volt/40 bg-ink/95 p-3 backdrop-blur-md md:hidden">
           <button
             onClick={() => setCartOpen(true)}
@@ -413,7 +394,7 @@ export default function App() {
   );
 }
 
-/* ------------------------------- toast card ------------------------------ */
+/* -------------------------------- toast card ------------------------------ */
 function ToastCard({
   toast,
   onView,
@@ -432,16 +413,21 @@ function ToastCard({
   return (
     <button
       onClick={onView}
-      className="pointer-events-auto animate-toast-in flex w-full items-center gap-3 border border-seam border-l-4 border-l-volt bg-coal px-4 py-3 text-left shadow-[0_18px_50px_rgba(0,0,0,0.6)] transition-colors hover:border-volt/60"
+      className={`pointer-events-auto flex w-full animate-toast-in items-center gap-3 border border-seam border-l-4 bg-coal px-4 py-3 text-left shadow-[0_18px_50px_rgba(0,0,0,0.6)] transition-colors hover:border-volt/60 ${
+        toast.kind === "ok" ? "border-l-volt" : "border-l-ember"
+      }`}
     >
-      <span className="grid h-9 w-9 shrink-0 place-items-center bg-volt/15 text-volt">
+      <span
+        className={`grid h-9 w-9 shrink-0 place-items-center ${
+          toast.kind === "ok" ? "bg-volt/15 text-volt" : "bg-ember/15 text-ember"
+        }`}
+      >
         <IconBolt className="w-4 h-4" />
       </span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-[13px] font-bold uppercase tracking-wide">{toast.title}</span>
+      <span className="min-w-0">
+        <span className="block truncate text-[13px] font-bold uppercase tracking-wide">{toast.title}</span>
         <span className="block truncate text-[12px] text-ash">{toast.sub}</span>
       </span>
-      <span className="shrink-0 text-[10px] font-bold uppercase tracking-[0.14em] text-volt">View</span>
     </button>
   );
 }
